@@ -3,30 +3,26 @@ import * as vscode from 'vscode';
 import { AbstractServer } from './AbstractServer';
 import { AnyObject } from '../../typeing/common';
 
-const SELECT_DATABSE_SQL = 
-`
-SELECT datname AS "Database" 
-FROM pg_database 
+const SELECT_DATABSE_SQL = `
+SELECT datname AS "Database"
+FROM pg_database
 WHERE datistemplate = false;
 `;
 
-const SELECT_SCHEMA_SQL = 
-`
+const SELECT_SCHEMA_SQL = `
 SELECT
   schema_name AS "Database"
 FROM information_schema.schemata
 `;
 
-const SELECT_TABLE_SQL = 
-`
-SELECT 
+const SELECT_TABLE_SQL = `
+SELECT
   table_name
 FROM information_schema.tables
 WHERE table_schema = $1::text
 `;
 
-const SELECT_COLUMNS_SQL = 
-`
+const SELECT_COLUMNS_SQL = `
 SELECT
   col.column_name                                                   AS "Field",
   CASE
@@ -72,8 +68,7 @@ ORDER BY
   , col.ordinal_position
 `;
 
-export class PostgreSQLType extends AbstractServer{
-
+export class PostgreSQLType extends AbstractServer {
     database: string;
     sslEnabled: boolean;
     schema: string;
@@ -102,7 +97,14 @@ export class PostgreSQLType extends AbstractServer{
      * @param {bool} [sslEnabled=false]
      * @return {Promise}
      */
-    connectPromise({ host, username, password, database, schema, sslEnabled }: AnyObject): Promise<undefined>{
+    connectPromise({
+        host,
+        username,
+        password,
+        database,
+        schema,
+        sslEnabled,
+    }: AnyObject): Promise<undefined> {
         const [hostName, port = '5432'] = host.split(':');
         this.host = hostName;
         this.port = port;
@@ -130,7 +132,7 @@ export class PostgreSQLType extends AbstractServer{
                     reject('PostgreSQL Error: ' + err.stack);
                     return;
                 }
-                resolve();
+                resolve(undefined);
             });
             connection.on('error', (err) => {
                 reject('PostgreSQL Error: ' + err.stack);
@@ -141,16 +143,19 @@ export class PostgreSQLType extends AbstractServer{
     /**
      * @return {Promise}
      */
-    closeConnect(){
-        return new Promise((resolve, reject) => {
-            if(!this.connection){
+    closeConnect() {
+        return new Promise<void>((resolve, reject) => {
+            if (!this.connection) {
                 resolve();
                 return;
             }
-            this.connection.end().then(() => {
-                this.connection = undefined;
-                resolve();
-            }).catch(reject);
+            this.connection
+                .end()
+                .then(() => {
+                    this.connection = undefined;
+                    resolve();
+                })
+                .catch(reject);
         });
     }
     /**
@@ -158,20 +163,24 @@ export class PostgreSQLType extends AbstractServer{
      * @param {object} params
      * @return {Promise}
      */
-    queryPromise(sql: string, params?: any): Promise<AnyObject[]>{
+    queryPromise(sql: string, params?: any): Promise<AnyObject[]> {
         return new Promise((resolve, reject) => {
-            if(!this.connection){
+            if (!this.connection) {
                 reject(new Error('PostgreSQL: No have correct connection.'));
                 return;
             }
-            this.connection.query(sql, params, (err: Error, rows: QueryResult) => {
-                this.release();
-                if (err) {
-                    reject(new Error('PostgreSQL Error: ' + err.message));
-                    return;
+            this.connection.query(
+                sql,
+                params,
+                (err: Error, rows: QueryResult) => {
+                    this.release();
+                    if (err) {
+                        reject(new Error('PostgreSQL Error: ' + err.message));
+                        return;
+                    }
+                    resolve(rows.rows);
                 }
-                resolve(rows.rows);
-            });
+            );
         });
     }
 
@@ -181,35 +190,41 @@ export class PostgreSQLType extends AbstractServer{
      * @param {function} func - callback
      * @param {object} params
      */
-    query (sql: string, func: any, params?: AnyObject){
-        this.queryPromise(sql, params).then(func).catch((errMsg) => {
-            vscode.window.showErrorMessage(errMsg);
-            this.outputMsg(errMsg);
-        });
+    query(sql: string, func: any, params?: AnyObject) {
+        this.queryPromise(sql, params)
+            .then(func)
+            .catch((errMsg) => {
+                vscode.window.showErrorMessage(errMsg);
+                this.outputMsg(errMsg);
+            });
     }
 
     /**
      * @return {Promise}
      */
-    getDatabase(): Promise<string[]>{
+    getDatabase(): Promise<string[]> {
         return new Promise((resolve, reject) => {
             Promise.all([
                 this.queryPromise(SELECT_DATABSE_SQL),
-                this.queryPromise(SELECT_SCHEMA_SQL)
-            ]).then(([database, schema]) => {
-                const allDatabase = [];
-                for (let i = 0; i < database.length; i++) {
-                    allDatabase.push(database[i].Database);
-                }
-                if(this.currentDatabase === null){
+                this.queryPromise(SELECT_SCHEMA_SQL),
+            ])
+                .then(([database, schema]) => {
+                    const allDatabase = [];
+                    for (let i = 0; i < database.length; i++) {
+                        allDatabase.push(database[i].Database);
+                    }
+                    if (this.currentDatabase === null) {
+                        resolve(allDatabase);
+                        return;
+                    }
+                    for (let i = 0; i < schema.length; i++) {
+                        allDatabase.push(
+                            this.currentDatabase + '.' + schema[i].Database
+                        );
+                    }
                     resolve(allDatabase);
-                    return;
-                }
-                for (let i = 0; i < schema.length; i++) {
-                    allDatabase.push(this.currentDatabase + '.' + schema[i].Database);
-                }
-                resolve(allDatabase);
-            }).catch(reject);
+                })
+                .catch(reject);
         });
     }
 
@@ -217,85 +232,95 @@ export class PostgreSQLType extends AbstractServer{
      * @param {string} name - name Database or Database.schema
      * @return {Promise}
      */
-    changeDatabase (name: string): Promise<{}> {
+    changeDatabase(name: string): Promise<{}> {
         const databaseAndSchema = name.split('.');
         const database = databaseAndSchema.splice(0, 1)[0];
         let schema = 'public';
-        if(databaseAndSchema.length > 0){
+        if (databaseAndSchema.length > 0) {
             schema = databaseAndSchema.join('.');
         }
-        return new Promise((resolve, reject) => {
-            if(database === this.currentDatabase){
+        return new Promise<{}>((resolve, reject) => {
+            if (database === this.currentDatabase) {
                 // @ts-ignore
                 this.changeSchema(schema).then(resolve).catch(reject);
-            }else{
+            } else {
                 this.closeConnect().then(() => {
                     this.connectPromise({
-                        host: this.host + ':' + this.port, 
-                        username: this.username, 
-                        password: this.password, 
+                        host: this.host + ':' + this.port,
+                        username: this.username,
+                        password: this.password,
                         sslEnabled: this.sslEnabled,
-                        database, 
-                        schema
-                    }).then(() =>{
-                        this.schema = schema;
-                        this.currentDatabase = database;
-                        resolve();
-                    }).catch(reject);
+                        database,
+                        schema,
+                    })
+                        .then(() => {
+                            this.schema = schema;
+                            this.currentDatabase = database;
+                            resolve({});
+                        })
+                        .catch(reject);
                 });
             }
         });
     }
 
-    changeSchema(schema: string){
-        return new Promise((resolve, reject) => {
-            this.queryPromise('SET search_path to ' + schema).then(() => {
-                this.schema = schema;
-                resolve();
-            }).catch(() => {
-                this.schema = 'public';
-                reject();
-            });
+    changeSchema(schema: string) {
+        return new Promise<void>((resolve, reject) => {
+            this.queryPromise('SET search_path to ' + schema)
+                .then(() => {
+                    this.schema = schema;
+                    resolve();
+                })
+                .catch(() => {
+                    this.schema = 'public';
+                    reject();
+                });
         });
     }
 
     /**
      * @return {Promise}
      */
-    refrestStructureDataBase (): Promise<{}> {
+    refrestStructureDataBase(): Promise<{}> {
         const currentStructure: any = {};
         const tablePromise: Promise<any>[] = [];
         const tableParams = [this.schema];
         return new Promise((resolve, reject) => {
-            this.queryPromise(SELECT_TABLE_SQL, tableParams).then((results: AnyObject[]) => {
-                for (let i = 0; i < results.length; i++) {
-                    const key = Object.keys(results[i])[0];
-                    const tableName =  results[i][key];
-                    const columnParams = [tableName,tableName];
-                    const promise = new Promise((resolve, reject) => {
-                        this.queryPromise(SELECT_COLUMNS_SQL, columnParams).then((column: AnyObject[]) => {
-                            const columns = [];
-                            for (let i = 0; i < column.length; i++) {
-                                const element = column[i];
-                                columns.push(element);
-                            }
-                            resolve({
-                                column : columns,
-                                tableName : tableName
-                            });
-                        }).catch(reject);
-                    });
-                    tablePromise.push(promise);
-                }
-                Promise.all(tablePromise).then(data => {
-                    for (let i = 0; i < data.length; i++) {
-                        const columnStructure = data[i].column;
-                        const tableName = data[i].tableName;
-                        currentStructure[tableName] = columnStructure;
+            this.queryPromise(SELECT_TABLE_SQL, tableParams).then(
+                (results: AnyObject[]) => {
+                    for (let i = 0; i < results.length; i++) {
+                        const key = Object.keys(results[i])[0];
+                        const tableName = results[i][key];
+                        const columnParams = [tableName, tableName];
+                        const promise = new Promise((resolve, reject) => {
+                            this.queryPromise(SELECT_COLUMNS_SQL, columnParams)
+                                .then((column: AnyObject[]) => {
+                                    const columns = [];
+                                    for (let i = 0; i < column.length; i++) {
+                                        const element = column[i];
+                                        columns.push(element);
+                                    }
+                                    resolve({
+                                        column: columns,
+                                        tableName: tableName,
+                                    });
+                                })
+                                .catch(reject);
+                        });
+                        tablePromise.push(promise);
                     }
-                    resolve(currentStructure);
-                }).catch(reject);
-            });
+                    Promise.all(tablePromise)
+                        .then((data) => {
+                            for (let i = 0; i < data.length; i++) {
+                                const columnStructure = data[i].column;
+                                const tableName = data[i].tableName;
+                                currentStructure[tableName] = columnStructure;
+                            }
+                            resolve(currentStructure);
+                        })
+                        .catch(reject);
+                }
+            );
         });
     }
 
@@ -312,7 +337,9 @@ export class PostgreSQLType extends AbstractServer{
      * @return {string} a SQL SELECT statement
      */
     getSelectTableSql(tableName: string): string {
-        return `SELECT * FROM ${this.schema}.${this.getIdentifiedTableName(tableName)}`;
+        return `SELECT * FROM ${this.schema}.${this.getIdentifiedTableName(
+            tableName
+        )}`;
     }
 }
 
@@ -324,43 +351,43 @@ PostgreSQLType.prototype.fieldsToConnect = [
         defaultValue: 'localhost',
         title: 'Host',
         name: 'host',
-        info: '(e.g host, 127.0.0.1, with port 127.0.0.1:3333)'
+        info: '(e.g host, 127.0.0.1, with port 127.0.0.1:3333)',
     },
     {
         type: 'text',
         defaultValue: 'postgres',
         title: 'Database',
         name: 'database',
-        info: ''
+        info: '',
     },
     {
         type: 'text',
         defaultValue: 'public',
         title: 'Schema',
         name: 'schema',
-        info: ''
+        info: '',
     },
     {
         type: 'text',
         defaultValue: 'root',
         title: 'Username',
         name: 'username',
-        info: '(e.g root/user)'
+        info: '(e.g root/user)',
     },
     {
         type: 'password',
         name: 'password',
         defaultValue: '',
         title: 'Password',
-        info: ''
+        info: '',
     },
     {
         type: 'checkbox',
         name: 'sslEnabled',
         defaultValue: false,
         title: 'Use SSL',
-        info: ''
-    }
+        info: '',
+    },
 ];
 
 export default PostgreSQLType;

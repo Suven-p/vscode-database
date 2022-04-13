@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { AbstractServer } from './AbstractServer';
-import { createConnection, Connection, ConnectionConfig } from 'mysql';
+import { createConnection, Connection } from 'mysql2';
 import { AnyObject } from '../../typeing/common';
+import { ConnectionOptions } from 'mysql2/typings/mysql';
 
-export class MySQLType extends AbstractServer
-{
+export class MySQLType extends AbstractServer {
     protected connection?: Connection;
     public socket: string;
 
@@ -17,25 +17,31 @@ export class MySQLType extends AbstractServer
         this.password = 'Empty';
         this.socket = '';
     }
-    
+
     /**
      * @param {object} fields
      * @return {Promise}
      */
-    connectPromise({host, username, password, socket, insecureAuth}: AnyObject): Promise<undefined> {
+    connectPromise({
+        host,
+        username,
+        password,
+        socket,
+        insecureAuth,
+    }: AnyObject): Promise<undefined> {
         const [hostName, port = '3306'] = host.split(':');
         this.host = hostName;
         this.port = port;
         this.username = username;
         this.password = password;
-        const setting: ConnectionConfig = {
+        const setting: ConnectionOptions = {
             host: this.host,
             port: parseInt(port, 10),
             user: username,
             password: password,
-            insecureAuth: insecureAuth
+            insecureAuth: insecureAuth,
         };
-        if(socket){
+        if (socket) {
             this.socket = hostName;
             setting.socketPath = this.host;
             delete setting.host;
@@ -43,11 +49,11 @@ export class MySQLType extends AbstractServer
         }
         return new Promise((resolve, reject) => {
             this.connection = createConnection(setting);
-            this.connection.connect((err: Error) => {
+            this.connection.connect((err) => {
                 if (err) {
                     reject(err.message);
                 } else {
-                    resolve();
+                    resolve(undefined);
                 }
             });
         });
@@ -58,25 +64,27 @@ export class MySQLType extends AbstractServer
      * @param {string} sql
      * @param {function} func - callback
      */
-    query (sql: string, func: any){
-        this.queryPromise(sql).then(func).catch((errMsg: string) => {
-            vscode.window.showErrorMessage(errMsg);
-            this.outputMsg(errMsg);
-        });
+    query(sql: string, func: any) {
+        this.queryPromise(sql)
+            .then(func)
+            .catch((errMsg: string) => {
+                vscode.window.showErrorMessage(errMsg);
+                this.outputMsg(errMsg);
+            });
     }
 
     /**
      * @param {string} sql
      * @return {Promise}
      */
-    queryPromise(sql: string): Promise<AnyObject[]>{
+    queryPromise(sql: string): Promise<AnyObject[]> {
         return new Promise((resolve, reject) => {
             if (!this.connection) {
                 reject('connection is undefined');
                 return;
             }
             this.connection.query(sql, (err: Error, rows: AnyObject[]) => {
-                if(err){
+                if (err) {
                     reject(err.message);
                     return;
                 }
@@ -88,15 +96,17 @@ export class MySQLType extends AbstractServer
     /**
      * @return {Promise<string[], Error>}
      */
-    getDatabase(): Promise<string[]>{
+    getDatabase(): Promise<string[]> {
         return new Promise((resolve, reject) => {
-            this.queryPromise('SHOW DATABASES').then((results: AnyObject[]) => {
-                const allDatabase: string[] = [];
-                for (let i = 0; i < results.length; i++) {
-                    allDatabase.push(results[i].Database as string);
-                }
-                resolve(allDatabase);
-            }).catch(reject);
+            this.queryPromise('SHOW DATABASES')
+                .then((results: AnyObject[]) => {
+                    const allDatabase: string[] = [];
+                    for (let i = 0; i < results.length; i++) {
+                        allDatabase.push(results[i].Database as string);
+                    }
+                    resolve(allDatabase);
+                })
+                .catch(reject);
         });
     }
 
@@ -104,15 +114,17 @@ export class MySQLType extends AbstractServer
      * @param {string} name - name Database
      * @return {Promise}
      */
-    changeDatabase (name: string): Promise<{}>{
+    changeDatabase(name: string): Promise<{}> {
         return new Promise((resolve, reject) => {
-            this.queryPromise('USE `' + name + '`').then(() => {
-                this.currentDatabase = name;
-                resolve();
-            }).catch((err) => {
-                this.currentDatabase = null;
-                reject(err);
-            });
+            this.queryPromise('USE `' + name + '`')
+                .then(() => {
+                    this.currentDatabase = name;
+                    resolve({});
+                })
+                .catch((err) => {
+                    this.currentDatabase = null;
+                    reject(err);
+                });
         });
     }
 
@@ -121,82 +133,101 @@ export class MySQLType extends AbstractServer
      * @return {string[]}
      */
     splitQueries(sqlMulti: string) {
-        const quotes=/^((?:[^"`']*?(?:(?:"(?:[^"]|\\")*?(?<!\\)")|(?:'(?:[^']|\\')*?(?<!\\)')|(?:`(?:[^`]|\\`)*?(?<!\\)`)))*?[^"`']*?)/;
-        const delimiterRegex=/^(?:\r\n|[ \t\r\n])*DELIMITER[\t ]*(.*?)(?:\r\n|\n|\r|$)/i;
+        const quotes =
+            /^((?:[^"`']*?(?:(?:"(?:[^"]|\\")*?(?<!\\)")|(?:'(?:[^']|\\')*?(?<!\\)')|(?:`(?:[^`]|\\`)*?(?<!\\)`)))*?[^"`']*?)/;
+        const delimiterRegex =
+            /^(?:\r\n|[ \t\r\n])*DELIMITER[\t ]*(.*?)(?:\r\n|\n|\r|$)/i;
         let match: any = [];
         const queries = [];
         let delimiter = ';';
-        let splitRegex=new RegExp(quotes.source+delimiter);
-        while(match!==null){
-            const delimiterCommand=sqlMulti.match(delimiterRegex);
-            if(delimiterCommand!==null){    //if to change delimiter
-                delimiter=delimiterCommand[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');  //change delimiter
-                splitRegex=new RegExp(quotes.source+delimiter);
-                sqlMulti=sqlMulti.slice(delimiterCommand[0].length); //remove delimiter from sql string
-            }else{
-                match=sqlMulti.match(splitRegex);   //split sql string
-                if(match!==null){
-                    queries.push(match[1]);     //push the split query into the queries array
-                    sqlMulti=sqlMulti.slice(match[1].length+delimiter.length);  //remove split query from sql string
+        let splitRegex = new RegExp(quotes.source + delimiter);
+        while (match !== null) {
+            const delimiterCommand = sqlMulti.match(delimiterRegex);
+            if (delimiterCommand !== null) {
+                //if to change delimiter
+                delimiter = delimiterCommand[1].replace(
+                    /[.*+?^${}()|[\]\\]/g,
+                    '\\$&'
+                ); //change delimiter
+                splitRegex = new RegExp(quotes.source + delimiter);
+                sqlMulti = sqlMulti.slice(delimiterCommand[0].length); //remove delimiter from sql string
+            } else {
+                match = sqlMulti.match(splitRegex); //split sql string
+                if (match !== null) {
+                    queries.push(match[1]); //push the split query into the queries array
+                    sqlMulti = sqlMulti.slice(
+                        match[1].length + delimiter.length
+                    ); //remove split query from sql string
                 }
             }
         }
-        queries.push(sqlMulti);     //push last query which could have no delimiter
+        queries.push(sqlMulti); //push last query which could have no delimiter
         //remove empty queries
         return queries.filter((sql) => {
             if (!sql) {
                 return false;
             }
-            const notEmpty = (sql.trim().replace(/(\r\n|\n|\r)/gm, '') !== '');
+            const notEmpty = sql.trim().replace(/(\r\n|\n|\r)/gm, '') !== '';
             return notEmpty ? true : false;
         });
     }
-    
+
     /**
      * @param {string} sql - a SQL string
      * @return {string} - the SQL string without comments
      */
     removeComments(sql: string) {
-        const quotes=/^((?:[^"`']*?(?:(?:"(?:[^"]|\\")*?(?<!\\)")|(?:'(?:[^']|\\')*?(?<!\\)')|(?:`(?:[^`]|\\`)*?(?<!\\)`)))*?[^"`']*?)/;
-        const cStyleComments=new RegExp(quotes.source+'/\\*.*?\\*/');
-        const doubleDashComments=new RegExp(quotes.source+'--(?:(?:[ \t]+.*(\r\n|\n|\r)?)|(\r\n|\n|\r)|$)');
-        const hashComments=new RegExp(quotes.source+'#.*(\r\n|\n|\r)?');
-        while(sql.match(cStyleComments)) sql=sql.replace(cStyleComments,'$1');
-        while(sql.match(doubleDashComments)) sql=sql.replace(doubleDashComments,'$1$2$3');
-        while(sql.match(hashComments)) sql=sql.replace(hashComments,'$1$2');
+        const quotes =
+            /^((?:[^"`']*?(?:(?:"(?:[^"]|\\")*?(?<!\\)")|(?:'(?:[^']|\\')*?(?<!\\)')|(?:`(?:[^`]|\\`)*?(?<!\\)`)))*?[^"`']*?)/;
+        const cStyleComments = new RegExp(quotes.source + '/\\*.*?\\*/');
+        const doubleDashComments = new RegExp(
+            quotes.source + '--(?:(?:[ \t]+.*(\r\n|\n|\r)?)|(\r\n|\n|\r)|$)'
+        );
+        const hashComments = new RegExp(quotes.source + '#.*(\r\n|\n|\r)?');
+        while (sql.match(cStyleComments))
+            sql = sql.replace(cStyleComments, '$1');
+        while (sql.match(doubleDashComments))
+            sql = sql.replace(doubleDashComments, '$1$2$3');
+        while (sql.match(hashComments)) sql = sql.replace(hashComments, '$1$2');
         return sql;
     }
 
     /**
      * @return {Promise}
      */
-    refrestStructureDataBase (): Promise<{}>{
+    refrestStructureDataBase(): Promise<{}> {
         const currentStructure: any = {};
         const tablePromise: Promise<{}>[] = [];
         return new Promise((resolve, reject) => {
-            this.queryPromise('SHOW tables').then(results => {
-                for (let i = 0; i < results.length; i++) {
-                    const key = Object.keys(results[i])[0];
-                    const tableName = results[i][key];
-                    const promise = new Promise((resolve, reject) => {
-                        this.queryPromise('SHOW COLUMNS FROM ' + tableName).then((column) => {
-                            resolve({
-                                column : column,
-                                tableName : tableName
-                            });
-                        }).catch(reject);
-                    }) as Promise<{}>;
-                    tablePromise.push(promise);
-                }
-                Promise.all(tablePromise).then((data: AnyObject[]) => {
-                    for (let i = 0; i < data.length; i++) {
-                        const columnStructure = data[i].column;
-                        const tableName = data[i].tableName;
-                        currentStructure[tableName] = columnStructure;
+            this.queryPromise('SHOW tables')
+                .then((results) => {
+                    for (let i = 0; i < results.length; i++) {
+                        const key = Object.keys(results[i])[0];
+                        const tableName = results[i][key];
+                        const promise = new Promise((resolve, reject) => {
+                            this.queryPromise('SHOW COLUMNS FROM ' + tableName)
+                                .then((column) => {
+                                    resolve({
+                                        column: column,
+                                        tableName: tableName,
+                                    });
+                                })
+                                .catch(reject);
+                        }) as Promise<{}>;
+                        tablePromise.push(promise);
                     }
-                    resolve(currentStructure);
-                }).catch(reject);
-            }).catch(reject);
+                    Promise.all(tablePromise)
+                        .then((data: AnyObject[]) => {
+                            for (let i = 0; i < data.length; i++) {
+                                const columnStructure = data[i].column;
+                                const tableName = data[i].tableName;
+                                currentStructure[tableName] = columnStructure;
+                            }
+                            resolve(currentStructure);
+                        })
+                        .catch(reject);
+                })
+                .catch(reject);
         });
     }
 
@@ -204,7 +235,7 @@ export class MySQLType extends AbstractServer
      * @param {string} tableName
      * @return {string} a quoted identifier table name
      */
-    getIdentifiedTableName(tableName: string){
+    getIdentifiedTableName(tableName: string) {
         return `\`${tableName}\``;
     }
 
@@ -212,10 +243,9 @@ export class MySQLType extends AbstractServer
      * @param {string} tableName
      * @return {string} a SQL SELECT statement
      */
-    getSelectTableSql(tableName: string): string{
+    getSelectTableSql(tableName: string): string {
         return `SELECT * FROM ${this.getIdentifiedTableName(tableName)}`;
     }
-
 }
 
 MySQLType.prototype.typeName = 'MySql';
@@ -226,36 +256,36 @@ MySQLType.prototype.fieldsToConnect = [
         defaultValue: 'localhost',
         name: 'host',
         title: 'Host',
-        info: '(e.g host, 127.0.0.1, with port 127.0.0.1:3333)'
+        info: '(e.g host, 127.0.0.1, with port 127.0.0.1:3333)',
     },
     {
         type: 'checkbox',
         defaultValue: false,
         name: 'socket',
         title: 'via socket',
-        info: '(if you want to connect via socket, enter socketPath in the host field)'
+        info: '(if you want to connect via socket, enter socketPath in the host field)',
     },
     {
         type: 'checkbox',
         defaultValue: false,
         name: 'insecureAuth',
         title: 'insecure auth',
-        info: '(Allow connecting to MySQL instances that ask for the old (insecure) authentication method)'
+        info: '(Allow connecting to MySQL instances that ask for the old (insecure) authentication method)',
     },
     {
         type: 'text',
         defaultValue: 'root',
         name: 'username',
         title: 'Username',
-        info: '(e.g root/user)'
+        info: '(e.g root/user)',
     },
     {
         type: 'password',
         name: 'password',
         defaultValue: '',
         title: 'Password',
-        info: ''
-    }
+        info: '',
+    },
 ];
 
 export default MySQLType;

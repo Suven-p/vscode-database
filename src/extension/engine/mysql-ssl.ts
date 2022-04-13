@@ -1,10 +1,9 @@
 import * as fs from 'fs';
-import { createConnection, ConnectionConfig } from 'mysql';
-import {MySQLType} from './mysql-pass';
+import { createConnection, ConnectionOptions } from 'mysql2';
+import { MySQLType } from './mysql-pass';
 import { AnyObject } from '../../typeing/common';
 
 export class MySQLSSLType extends MySQLType {
-
     public ca: string;
     public key: string;
     public cert: string;
@@ -20,14 +19,22 @@ export class MySQLSSLType extends MySQLType {
         if (this.name) {
             return this.name;
         }
-        return  `${this.host}:${this.port} (${this.typeName})`;
+        return `${this.host}:${this.port} (${this.typeName})`;
     }
 
     /**
      * @param {object} fields
      * @return {Promise}
      */
-    connectPromise({host, username, password, socket, key, cert, ca}: AnyObject): Promise<undefined> {
+    connectPromise({
+        host,
+        username,
+        password,
+        socket,
+        key,
+        cert,
+        ca,
+    }: AnyObject): Promise<undefined> {
         const [hostName, port = '3306'] = host.split(':');
         this.host = hostName;
         this.port = port;
@@ -36,17 +43,17 @@ export class MySQLSSLType extends MySQLType {
         this.ca = ca;
         this.key = key;
         this.cert = cert;
-        const setting: ConnectionConfig = {
+        const setting: ConnectionOptions = {
             host: this.host,
             port: parseInt(port, 10),
             user: username,
             password: password,
             ssl: {
-                rejectUnauthorized : false,
-                ca   : fs.readFileSync(ca).toString(),
-                key  : fs.readFileSync(key).toString(),
-                cert : fs.readFileSync(cert).toString(),
-            }
+                rejectUnauthorized: false,
+                ca: fs.readFileSync(ca).toString(),
+                key: fs.readFileSync(key).toString(),
+                cert: fs.readFileSync(cert).toString(),
+            },
         };
         if (socket) {
             this.socket = hostName;
@@ -56,12 +63,12 @@ export class MySQLSSLType extends MySQLType {
         }
         const connection = createConnection(setting);
         return new Promise((resolve, reject) => {
-            connection.connect((err: Error) => {
+            connection.connect((err) => {
                 if (err) {
                     reject(err.message);
                 } else {
                     this.connection = connection;
-                    resolve();
+                    resolve(undefined);
                 }
             });
         });
@@ -70,7 +77,7 @@ export class MySQLSSLType extends MySQLType {
     /**
      * @return {object} - object with some data to save
      */
-    getDataToRestore(){
+    getDataToRestore() {
         return Promise.resolve({
             type: this.type,
             name: this.name,
@@ -82,18 +89,17 @@ export class MySQLSSLType extends MySQLType {
             database: this.currentDatabase,
         });
     }
-       
+
     /**
      * @param {object} fields - result getDataToRestore() function
      * @return {Promise}
      */
-    restoreConnection(fields: AnyObject): Promise<undefined>{
+    restoreConnection(fields: AnyObject): Promise<undefined> {
         return this.connectPromise(fields);
-    } 
-
+    }
 }
 
-MySQLSSLType.prototype.typeName= 'MySql (SSL)';
+MySQLSSLType.prototype.typeName = 'MySql (SSL)';
 
 MySQLSSLType.prototype.fieldsToConnect = [
     {
@@ -101,36 +107,36 @@ MySQLSSLType.prototype.fieldsToConnect = [
         defaultValue: 'localhost',
         name: 'host',
         title: 'Host',
-        info: '(e.g host, 127.0.0.1, with port 127.0.0.1:3333)'
+        info: '(e.g host, 127.0.0.1, with port 127.0.0.1:3333)',
     },
     {
         type: 'checkbox',
         defaultValue: false,
         name: 'socket',
         title: 'via socket',
-        info: '(if you want to connect via socket, enter socketPath in the host field)'
+        info: '(if you want to connect via socket, enter socketPath in the host field)',
     },
     {
         type: 'text',
         defaultValue: '',
         name: 'ca',
         title: 'CA',
-        info: '(Server certificates - path to `root.crt`)'
+        info: '(Server certificates - path to `root.crt`)',
     },
     {
         type: 'text',
         defaultValue: '',
         title: 'KEY',
         name: 'key',
-        info: '(Client key - path to `client.key`)'
+        info: '(Client key - path to `client.key`)',
     },
     {
         type: 'text',
         defaultValue: '',
         title: 'CERT',
         name: 'cert',
-        info: '(Client certificates - path to `client.crt`)'
-    }
+        info: '(Client certificates - path to `client.crt`)',
+    },
 ];
 
 export default MySQLSSLType;
