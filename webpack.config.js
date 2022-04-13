@@ -4,13 +4,17 @@
 
 const path = require('path');
 
+// Compile fails with message: Can't resolve 'pg-native'
+// Solved using: https://github.com/brianc/node-postgres/issues/838#issuecomment-405646013
+const { IgnorePlugin } = require('webpack');
+
 //@ts-check
 /** @typedef {import('webpack').Configuration} WebpackConfig **/
 
 /** @type WebpackConfig */
 const extensionConfig = {
   target: 'node', // vscode extensions run in a Node.js-context 📖 -> https://webpack.js.org/configuration/node/
-	mode: 'none', // this leaves the source code as close as possible to the original (when packaging we set this to 'production')
+  mode: 'none', // this leaves the source code as close as possible to the original (when packaging we set this to 'production')
 
   entry: './src/extension.ts', // the entry point of this extension, 📖 -> https://webpack.js.org/configuration/entry-context/
   output: {
@@ -27,6 +31,9 @@ const extensionConfig = {
     // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader
     extensions: ['.ts', '.js']
   },
+  plugins: [
+    new IgnorePlugin({ resourceRegExp: /^pg-native$/ })
+  ],
   module: {
     rules: [
       {
@@ -45,4 +52,4 @@ const extensionConfig = {
     level: "log", // enables logging required for problem matchers
   },
 };
-module.exports = [ extensionConfig ];
+module.exports = [extensionConfig];
